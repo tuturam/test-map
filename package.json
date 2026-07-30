@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@maptiler/geocoding-control": "^3.0.0",
     "@maptiler/sdk": "^4.0.2",
     "vue": "^3.5.39"
   },
