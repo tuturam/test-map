@@ -6,6 +6,7 @@ import {
   generateWaypointsForLoop,
   haversine,
   randomId,
+  routeDirection,
 } from './math';
 
 describe('haversine', () => {
@@ -81,5 +82,20 @@ describe('bearingCompass', () => {
 describe('randomId', () => {
   it('returns unique ids', () => {
     expect(randomId()).not.toBe(randomId());
+  });
+});
+
+describe('routeDirection', () => {
+  const center: [number, number] = [0, 0];
+  // north, east, south
+  const waypoints: [number, number][] = [[0, 1], [1, 0], [0, -1]];
+
+  it('points at the waypoint visited right after the center in a trip', () => {
+    // trip visit order: wp2 → wp1 → center → wp3 → back to wp2
+    expect(routeDirection(center, waypoints, [2, 1, 0, 3])).toBe('south');
+  });
+
+  it('falls back to the first waypoint when the trip did not reorder', () => {
+    expect(routeDirection(center, waypoints, null)).toBe('north');
   });
 });

@@ -18,6 +18,15 @@ export type RouteResult = {
   geojson: LineString;
 };
 
+export type TripRouteResult = {
+  result: RouteResult;
+  /**
+   * Visit order of `coords` (input indices) after the trip endpoint solved
+   * the optimal loop. Null when the fallback ordered route was used.
+   */
+  waypointOrder: number[] | null;
+};
+
 export class RoutingError extends Error {
   /**
    * True when the provider gave a definitive answer (e.g. no route exists).
@@ -78,6 +87,64 @@ async function fetchOsrm(profile: RouteProfile, coords: LngLat[]): Promise<Route
     durationMin: route.duration / 60,
     geojson: route.geometry as LineString,
   };
+}
+
+/**
+ * OSRM trip endpoint: solves the optimal closed loop through `coords`
+ * (TSP) instead of forcing the given order, so the loop stops retracing
+ * itself along the same roads.
+ */
+async function fetchOsrmTrip(profile: RouteProfile, coords: LngLat[]): Promise<TripRouteResult> {
+  const positions = coords.map(([lng, lat]) => `${lng},${lat}`).join(';');
+  const url =
+    `${routingConfig.osrmBaseUrl}/trip/v1/${profile}/${positions}` +
+    '?roundtrip=true&source=any&destination=any&geometries=geojson&overview=full&steps=false';
+
+  let res: Response;
+  try {
+    res = await withTimeout(fetch(url), routingConfig.timeout);
+  } catch {
+    throw new RoutingError('Cannot connect to routing server');
+  }
+  if (!res.ok) {
+    if (res.status === 404) throw new RoutingError('No route available in this area', true);
+    throw new RoutingError(`Routing server error (${res.status})`);
+  }
+  const data = await res.json();
+  if (data.code !== 'Ok') {
+    throw new RoutingError(
+      data.code === 'NoTrip' ? 'No route available in this area' : `Routing failed: ${data.code}`,
+      true,
+    );
+  }
+  const trip = data.trips?.[0];
+  if (!trip?.geometry) throw new RoutingError('Empty trip response');
+  return {
+    result: {
+      distanceKm: trip.distance / 1000,
+      durationMin: trip.duration / 60,
+      geojson: trip.geometry as LineString,
+    },
+    waypointOrder: (data.waypoints ?? []).map((w: { waypoint_index: number }) => w.waypoint_index),
+  };
+}
+
+/**
+ * Optimal closed loop through `coords` via the OSRM trip endpoint.
+ * Falls back to ordered routing (`fetchRoute`) when the trip endpoint
+ * fails or finds no loop — ordered routing still works for degenerate
+ * networks where a TSP loop does not.
+ */
+export async function fetchTripRoute(profile: RouteProfile, coords: LngLat[]): Promise<TripRouteResult> {
+  for (let attempt = 0; attempt <= routingConfig.retries; attempt++) {
+    try {
+      return await fetchOsrmTrip(profile, coords);
+    } catch {
+      // fall through to the ordered route below
+    }
+  }
+  const result = await fetchRoute(profile, coords);
+  return { result, waypointOrder: null };
 }
 
 async function fetchOrs(profile: RouteProfile, coords: LngLat[]): Promise<RouteResult> {

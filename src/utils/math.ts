@@ -93,3 +93,20 @@ export function bearingCompass(from: LngLat, to: LngLat): string {
 export function randomId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
+
+/**
+ * Bearing from `center` toward the first waypoint visited after `center`
+ * in a trip. Input coords are `[center, ...waypoints]`, so `waypointOrder`
+ * contains 0 for the center and `i` for `waypoints[i - 1]`.
+ * Falls back to the first waypoint when the trip did not reorder (null).
+ */
+export function routeDirection(
+  center: LngLat,
+  waypoints: LngLat[],
+  waypointOrder: number[] | null,
+): string {
+  if (!waypointOrder) return bearingCompass(center, waypoints[0]);
+  const centerPos = waypointOrder.indexOf(0);
+  const nextIdx = waypointOrder[(centerPos + 1) % waypointOrder.length];
+  return bearingCompass(center, nextIdx === 0 ? waypoints[0] : waypoints[nextIdx - 1]);
+}

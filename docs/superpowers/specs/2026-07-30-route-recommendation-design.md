@@ -177,9 +177,9 @@ function generateWaypointForLinear(
 
 **Linear:** `GET /route/v1/footing/{A.lng},{A.lat};{B.lng},{B.lat}?geometries=geojson&overview=full`
 
-**Loop:** `GET /route/v1/footing/{A.lng},{A.lat};{B.lng},{B.lat};{C.lng},{C.lat};{A.lng},{A.lat}?geometries=geojson&overview=full`
+**Loop:** `GET /trip/v1/footing/{A.lng},{A.lat};{B.lng},{B.lat};{C.lng},{C.lat};{D.lng},{D.lat}?roundtrip=true&source=any&destination=any&geometries=geojson&overview=full`
 
-A appears again at end → closes loop.
+The trip endpoint solves the optimal closed loop (TSP) through A + 3 waypoints, so the loop reorders waypoints and stops retracing the same roads. Response uses `trips[0]` (not `routes[0]`); `waypoints[].waypoint_index` gives the visit order. Falls back to ordered `A→B→C→D→A` routing when the trip endpoint fails.
 
 OSRM profiles: `footing` (pedestrian, runner), `cycling` (bike).
 

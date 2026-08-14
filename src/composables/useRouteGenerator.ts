@@ -1,12 +1,12 @@
 import { ref } from 'vue';
 import type { LngLat, RouteOption } from '../types/route';
 import {
-  bearingCompass,
   generateWaypointForLinear,
   generateWaypointsForLoop,
   randomId,
+  routeDirection,
 } from '../utils/math';
-import { fetchRoute, type RouteProfile } from '../utils/osrm';
+import { fetchRoute, fetchTripRoute, type RouteProfile } from '../utils/osrm';
 import { addElevation } from '../utils/elevation';
 
 export type GenerateParams = {
@@ -26,7 +26,10 @@ function loopRadius(p: GenerateParams): number {
   return p.startMode === 'radius' ? p.radiusKm : p.targetDistanceKm / 2;
 }
 
-/** Waypoints for one option; loop includes the closing point at the end. */
+/**
+ * Waypoints for one option. Loop coordinates stay open (no closing center):
+ * the trip endpoint closes the loop itself while reordering waypoints.
+ */
 function buildCoordinates(p: GenerateParams): { waypoints: LngLat[]; coordinates: LngLat[] } {
   const { referencePoint: center, routeType } = p;
   if (routeType === 'linear') {
@@ -34,14 +37,16 @@ function buildCoordinates(p: GenerateParams): { waypoints: LngLat[]; coordinates
     return { waypoints: [waypoint], coordinates: [center, waypoint] };
   }
   const waypoints = generateWaypointsForLoop(center, loopRadius(p));
-  return { waypoints, coordinates: [center, ...waypoints, center] };
+  return { waypoints, coordinates: [center, ...waypoints] };
 }
 
 async function generateOneOption(
   p: GenerateParams,
 ): Promise<{ option: RouteOption; hasElevation: boolean }> {
   const { waypoints, coordinates } = buildCoordinates(p);
-  const result = await fetchRoute(p.profile, coordinates);
+  // Loop: optimal order via the trip endpoint; linear: ordered routing.
+  const trip = p.routeType === 'loop' ? await fetchTripRoute(p.profile, coordinates) : null;
+  const result = trip?.result ?? (await fetchRoute(p.profile, coordinates));
 
   const elevation = await addElevation(result.geojson);
   const geojson = elevation
@@ -55,7 +60,7 @@ async function generateOneOption(
     hasElevation: elevation !== null,
     option: {
       id: randomId(),
-      direction: bearingCompass(p.referencePoint, waypoints[0]),
+      direction: routeDirection(p.referencePoint, waypoints, trip?.waypointOrder ?? null),
       distanceKm: Number(result.distanceKm.toFixed(1)),
       elevationGain: elevation?.gain ?? 0,
       elevationLoss: elevation?.loss ?? 0,
