@@ -30,4 +30,6 @@ export interface GeneratePayload {
   routeType: RouteType
   profile: RouteProfile
   targetDistanceKm: number
+  resolvedCoords: string | null
+  resolvedLabel: string | null
 }

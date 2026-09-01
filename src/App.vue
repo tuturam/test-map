@@ -40,10 +40,21 @@ async function handleGenerate(payload: GeneratePayload) {
 
 async function resolveStartPoint(payload: GeneratePayload): Promise<{ center: LngLat; label: string }> {
   if (payload.useGeolocation) {
+    // If we already have resolved coords from GPS, use them
+    if (payload.resolvedCoords) {
+      const [lng, lat] = payload.resolvedCoords.split(',').map(parseFloat)
+      return { center: [lng, lat], label: payload.resolvedLabel ?? 'My position' }
+    }
+    // Otherwise get current position
     const center = await getCurrentPosition()
     return { center, label: 'My position' }
   }
   if (payload.searchQuery) {
+    // If we already have resolved coords from search, use them
+    if (payload.resolvedCoords) {
+      const [lng, lat] = payload.resolvedCoords.split(',').map(parseFloat)
+      return { center: [lng, lat], label: payload.resolvedLabel ?? payload.searchQuery }
+    }
     const result = await geocodeForward(payload.searchQuery)
     return { center: result.center, label: result.label }
   }

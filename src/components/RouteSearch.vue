@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { GeneratePayload, RouteProfile, RouteType, StartMode } from '../types/route'
+import { geocodeForward } from '../composables/useGeocode'
 
 defineProps<{ loading: boolean }>()
 
@@ -17,14 +18,99 @@ const customKm = ref(5)
 
 const searchError = ref<string | null>(null)
 const distanceError = ref<string | null>(null)
+const resolvedCoords = ref<string | null>(null)
+const resolvedLabel = ref<string | null>(null)
+const resolving = ref(false)
+const searched = ref(false)
+const geolocationError = ref<string | null>(null)
 
 const targetDistanceKm = computed(() =>
   distancePreset.value === 'custom' ? customKm.value : Number(distancePreset.value)
 )
 
+watch(
+  searchQuery,
+  async (newVal) => {
+    if (!useGeolocation.value && newVal && newVal.trim() && !resolving.value) {
+      const query = newVal.trim()
+      if (query.length >= 2) {
+        try {
+          resolving.value = true
+          searchError.value = null
+          const result = await geocodeForward(query)
+          resolvedCoords.value = `${result.center[0].toFixed(6)}, ${result.center[1].toFixed(6)}`
+          resolvedLabel.value = result.label
+          searched.value = true
+        } catch (err) {
+          if (err instanceof Error) {
+            switch (err.message) {
+              case 'LOCATION_NOT_FOUND':
+                searchError.value = 'Location not found. Check the name, or use your position instead.'
+                break
+              default:
+                searchError.value = 'Search error. Try again.'
+            }
+          } else {
+            searchError.value = 'Search error. Try again.'
+          }
+          resolvedCoords.value = null
+          resolvedLabel.value = null
+          searched.value = false
+        } finally {
+          resolving.value = false
+        }
+      }
+    }
+  }
+)
+
 function toggleGeolocation() {
   useGeolocation.value = !useGeolocation.value
   searchError.value = null
+  geolocationError.value = null
+  resolvedCoords.value = null
+  resolvedLabel.value = null
+  searched.value = false
+
+  if (useGeolocation.value) {
+    resolving.value = true
+    if (!('geolocation' in navigator)) {
+      geolocationError.value = 'GPS not available on this device.'
+      useGeolocation.value = false
+      resolving.value = false
+      return
+    }
+    // Check if we're on a secure context (HTTPS or localhost)
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      geolocationError.value = 'GPS requires HTTPS. Run this app over HTTPS or localhost.'
+      useGeolocation.value = false
+      resolving.value = false
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lng = pos.coords.longitude.toFixed(6)
+        const lat = pos.coords.latitude.toFixed(6)
+        resolvedCoords.value = `${lng}, ${lat}`
+        resolvedLabel.value = 'My position'
+        resolving.value = false
+      },
+      (err) => {
+        resolving.value = false
+        if (err.code === err.PERMISSION_DENIED) {
+          geolocationError.value = 'GPS permission denied. Search for a location instead.'
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          geolocationError.value = 'GPS position unavailable. Search for a location instead.'
+        } else {
+          geolocationError.value = 'GPS error. Search for a location instead.'
+        }
+        useGeolocation.value = false
+        resolvedCoords.value = null
+        resolvedLabel.value = null
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
 }
 
 function submit() {
@@ -32,7 +118,7 @@ function submit() {
   distanceError.value = null
 
   if (!useGeolocation.value && !searchQuery.value.trim()) {
-    searchError.value = 'Enter a place name, or switch on “Use my position”.'
+    searchError.value = 'Enter a place name, or switch on "Use my position".'
     return
   }
 
@@ -50,6 +136,8 @@ function submit() {
     routeType: routeType.value,
     profile: profile.value,
     targetDistanceKm: target,
+    resolvedCoords: resolvedCoords.value,
+    resolvedLabel: resolvedLabel.value,
   })
 }
 </script>
@@ -98,9 +186,20 @@ function submit() {
       >
         {{ searchError ?? (useGeolocation ? 'Using your GPS position.' : 'Name a city, district, or landmark.') }}
       </p>
+      <div v-if="geolocationError" class="field__hint field__hint--error" style="margin-top: var(--space-xs);">
+        {{ geolocationError }}
+      </div>
+      <div v-if="resolvedCoords && !resolving" class="resolved-coords">
+        <span class="resolved-coords__label">{{ resolvedLabel }}</span>
+        <span class="resolved-coords__value">{{ resolvedCoords }}</span>
+      </div>
+      <div v-if="resolving" class="resolved-coords">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>Resolving&hellip;</span>
+      </div>
     </div>
 
-    <fieldset class="field">
+    <div class="field">
       <legend class="field__label">Start mode</legend>
       <div class="seg">
         <span class="seg__item">
@@ -119,7 +218,7 @@ function submit() {
             : 'Every route starts at the anchor itself.'
         }}
       </p>
-    </fieldset>
+    </div>
 
     <div v-if="startMode === 'radius'" class="field">
       <span class="field__label">Anchor radius</span>
@@ -131,7 +230,7 @@ function submit() {
       </div>
     </div>
 
-    <fieldset class="field">
+    <div class="field">
       <legend class="field__label">Route</legend>
       <div class="seg">
         <span class="seg__item">
@@ -146,9 +245,9 @@ function submit() {
       <p class="field__hint">
         {{ routeType === 'loop' ? 'Three points, returns to the start.' : 'Out to a point, no return.' }}
       </p>
-    </fieldset>
+    </div>
 
-    <fieldset class="field">
+    <div class="field">
       <legend class="field__label">Mode</legend>
       <div class="seg">
         <span class="seg__item">
@@ -160,7 +259,7 @@ function submit() {
           <label for="pr-ride">Ride</label>
         </span>
       </div>
-    </fieldset>
+    </div>
 
     <div class="field">
       <span class="field__label">Distance</span>
@@ -231,5 +330,34 @@ function submit() {
 .search__submit {
   width: 100%;
   margin-top: var(--space-md);
+}
+
+.resolved-coords {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+}
+
+.resolved-coords__label {
+  color: var(--color-muted);
+}
+
+.resolved-coords__value {
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 150ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 </style>
